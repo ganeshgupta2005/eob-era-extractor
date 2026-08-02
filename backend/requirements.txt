@@ -6,3 +6,4 @@ pdf2image==1.17.0
 pytesseract==0.3.13
 groq==0.11.0
 python-dotenv==1.0.1
+httpx==0.27.2
