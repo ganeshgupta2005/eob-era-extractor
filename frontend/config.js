@@ -3,5 +3,5 @@
 // Leave as "" to use the same origin (only works when FastAPI serves the
 // frontend directly, e.g. when running locally with `uvicorn main:app`).
 window.APP_CONFIG = {
-  API_BASE: "",
+  API_BASE: "https://eob-era-extractor-backend.onrender.com",
 };
