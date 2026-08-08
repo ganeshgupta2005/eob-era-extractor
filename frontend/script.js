@@ -15,15 +15,30 @@ const downloadBtn = document.getElementById("download-csv-btn");
 
 const FIXED_COLUMNS = [
   { key: "insurance_name", label: "Insurance" },
+  { key: "payer_level", label: "Payer Level" },
   { key: "patient_name", label: "Patient" },
+  { key: "patient_account_number", label: "Account #" },
   { key: "policy_id", label: "Policy ID" },
-  { key: "invoice_number", label: "Invoice #" },
+  { key: "group_number", label: "Group #" },
   { key: "claim_number", label: "Claim #" },
   { key: "date_of_service", label: "DOS" },
   { key: "cpt_code", label: "CPT" },
-  { key: "charge_amount", label: "Charge" },
-  { key: "paid_amount", label: "Paid" },
+  { key: "diagnosis_code", label: "Dx" },
+  { key: "pos", label: "POS" },
+  { key: "billed_amount", label: "Billed (BA)" },
+  { key: "allowed_amount", label: "Allowed (AA)" },
+  { key: "contractual_adjustment", label: "Contractual (CA)" },
+  { key: "paid_amount", label: "Paid (PA)" },
+  { key: "deductible", label: "Deductible" },
+  { key: "coinsurance", label: "Coinsurance" },
+  { key: "copay", label: "Copay" },
+  { key: "patient_responsibility", label: "Patient Resp (PR)" },
+  { key: "claim_status", label: "Status" },
+  { key: "denial_code", label: "Denial Code" },
+  { key: "remark_code", label: "Remark Code" },
   { key: "check_or_eft_number", label: "Check/EFT #" },
+  { key: "check_date", label: "Check Date" },
+  { key: "mode_of_payment", label: "Payment Mode" },
 ];
 
 let lastRows = [];
@@ -89,7 +104,11 @@ form.addEventListener("submit", async (e) => {
 
     lastRows = data.rows || [];
     renderResults(lastRows);
-    setStatus(`Done. Extracted ${data.row_count} row(s) from "${data.filename}".`, "success");
+    const providerLabel = data.ai_provider_used === "groq" ? "Groq (fallback)" : "Gemini";
+    setStatus(
+      `Done. Extracted ${data.row_count} row(s) from "${data.filename}" using ${providerLabel}.`,
+      "success"
+    );
   } catch (err) {
     setStatus(`Error: ${err.message}`, "error");
   } finally {
@@ -111,7 +130,7 @@ function renderResults(rows) {
   if (!rows.length) {
     resultsSection.classList.remove("hidden");
     rowCountEl.textContent = "0 rows";
-    tbody.innerHTML = `<tr><td colspan="${FIXED_COLUMNS.length}">No claim/service-line data found in this document.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${FIXED_COLUMNS.length + 1}">No claim/service-line data found in this document.</td></tr>`;
     return;
   }
 
@@ -129,6 +148,9 @@ function renderResults(rows) {
     th.textContent = col.label;
     headerRow.appendChild(th);
   });
+  const reviewTh = document.createElement("th");
+  reviewTh.textContent = "Review";
+  headerRow.appendChild(reviewTh);
   lastOtherKeys.forEach((key) => {
     const th = document.createElement("th");
     th.textContent = prettifyKey(key);
@@ -139,11 +161,29 @@ function renderResults(rows) {
   // Body rows
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    if (row.needs_review) tr.classList.add("needs-review");
+
     FIXED_COLUMNS.forEach((col) => {
       const td = document.createElement("td");
-      appendCellValue(td, row[col.key]);
+      if (col.key === "claim_status") {
+        appendStatusCell(td, row[col.key]);
+      } else {
+        appendCellValue(td, row[col.key]);
+      }
       tr.appendChild(td);
     });
+
+    const reviewTd = document.createElement("td");
+    if (row.needs_review) {
+      reviewTd.textContent = "⚠️ Check";
+      reviewTd.classList.add("review-flag");
+      reviewTd.title = (row.review_notes || []).join("\n");
+    } else {
+      reviewTd.textContent = "✓";
+      reviewTd.classList.add("review-ok");
+    }
+    tr.appendChild(reviewTd);
+
     lastOtherKeys.forEach((key) => {
       const td = document.createElement("td");
       appendCellValue(td, (row.other_fields || {})[key]);
@@ -154,6 +194,16 @@ function renderResults(rows) {
 
   rowCountEl.textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
   resultsSection.classList.remove("hidden");
+}
+
+function appendStatusCell(td, value) {
+  if (!value) {
+    td.textContent = "—";
+    td.classList.add("null-value");
+    return;
+  }
+  td.textContent = value;
+  td.classList.add(value === "PAID" ? "status-paid" : "status-denied");
 }
 
 function appendCellValue(td, value) {
@@ -175,12 +225,19 @@ function prettifyKey(key) {
 downloadBtn.addEventListener("click", () => {
   if (!lastRows.length) return;
 
-  const headers = [...FIXED_COLUMNS.map((c) => c.label), ...lastOtherKeys.map(prettifyKey)];
+  const headers = [
+    ...FIXED_COLUMNS.map((c) => c.label),
+    "Needs Review",
+    "Review Notes",
+    ...lastOtherKeys.map(prettifyKey),
+  ];
   const csvRows = [headers.join(",")];
 
   lastRows.forEach((row) => {
     const values = [
       ...FIXED_COLUMNS.map((c) => csvEscape(row[c.key])),
+      csvEscape(row.needs_review ? "YES" : "NO"),
+      csvEscape((row.review_notes || []).join("; ")),
       ...lastOtherKeys.map((k) => csvEscape((row.other_fields || {})[k])),
     ];
     csvRows.push(values.join(","));

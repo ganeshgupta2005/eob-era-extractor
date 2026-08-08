@@ -11,7 +11,7 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()  # load ANTHROPIC_API_KEY etc. from .env
+load_dotenv()  # load GEMINI_API_KEY / GROQ_API_KEY etc. from .env
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from pdf_processor import extract_text_from_pdf, PDFExtractionError
 from ai_processor import extract_payment_data, AIExtractionError
+from rcm_rules import apply_rcm_rules
 
 app = FastAPI(title="EOB/ERA Payment Posting Extractor")
 
@@ -52,22 +53,32 @@ async def extract(file: UploadFile = File(...)):
     except PDFExtractionError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # Step 2: send text to Claude for structured extraction
+    # Step 2: send text to the AI for structured extraction
+    # (tries Gemini first, automatically falls back to Groq if Gemini errors)
     try:
-        rows = extract_payment_data(document_text)
+        rows, provider_used = extract_payment_data(document_text)
     except AIExtractionError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+    # Step 3: apply deterministic RCM formulas (BA=AA+CA, AA=PA+PR, etc.)
+    # to fill solvable gaps, validate reconciliation, and compute claim status
+    rows = apply_rcm_rules(rows)
 
     return {
         "filename": file.filename,
         "row_count": len(rows),
+        "ai_provider_used": provider_used,
         "rows": rows,
     }
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "api_key_configured": bool(os.environ.get("GROQ_API_KEY"))}
+    return {
+        "status": "ok",
+        "gemini_key_configured": bool(os.environ.get("GEMINI_API_KEY")),
+        "groq_key_configured": bool(os.environ.get("GROQ_API_KEY")),
+    }
 
 
 # --- Serve the frontend as static files, so you can run one server locally for everything.
